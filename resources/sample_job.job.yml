@@ -1,0 +1,60 @@
+resources:
+  jobs:
+    sample_job:
+      name: sample_job
+      
+      trigger:
+        periodic:
+          interval: 1
+          unit: DAYS
+
+      parameters:
+        - name: catalog
+          default: logistics_prod
+        - name: schema
+          default: raw_landing
+
+      tasks:
+        # Ingestion Task 1: OpenSky Flight Telemetry
+        - task_key: ingest_opensky_task
+          spark_python_task:
+            python_file: ../src/ingest_opensky.py
+          environment_key: default
+
+        # Ingestion Task 2: Weather & Marine Telemetry
+        - task_key: ingest_weather_marine_task
+          spark_python_task:
+            python_file: ../src/ingest_weather_marine.py
+          environment_key: default
+
+        # Silver Transformation Task 1: Flight Telemetry
+        - task_key: silver_flight_transform_task
+          depends_on:
+            - task_key: ingest_opensky_task
+          spark_python_task:
+            python_file: ../src/enterprise_logistics_lakehouse_etl/transformations/silver_flight_transform.py
+          environment_key: default
+
+        # Silver Transformation Task 2: Weather & Marine Telemetry
+        - task_key: silver_weather_transform_task
+          depends_on:
+            - task_key: ingest_weather_marine_task
+          spark_python_task:
+            python_file: ../src/enterprise_logistics_lakehouse_etl/transformations/silver_weather_transform.py
+          environment_key: default
+
+        # Gold Risk Aggregation Task (Depends on both Silver transformation layers)
+        - task_key: gold_risk_agg_task
+          depends_on:
+            - task_key: silver_flight_transform_task
+            - task_key: silver_weather_transform_task
+          spark_python_task:
+            python_file: ../src/enterprise_logistics_lakehouse_etl/transformations/gold_risk_agg.py
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl
